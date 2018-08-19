@@ -4,4 +4,6 @@ title: About
 permalink: /about/
 ---
 
-[website](http://cs.stanford.edu/people/dalaird/)
+[academic website](https://cs.stanford.edu/people/dalaird/)
+[twitter](https://twitter.com/DillonLaird)
+[instagram](https://instagram.com/dillonlaird)
