@@ -6,6 +6,9 @@
 const nextConfig = {
   output: 'export',
   basePath: '/dillonalaird.github.io',
+  images: {
+    unoptimized: true,
+  },
   experimental: {
     appDir: true,
   },
