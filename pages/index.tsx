@@ -23,7 +23,6 @@ export default function Home({
       <section className={utilStyles.headingMd}>
       <center>
         <p>
-          Test
           Working on vision models <a href="https://landing.ai/">@LandingAI</a> 🤖
           Previously <a href="https://twitter.com/StanfordEng"> @StanfordEng </a> <a href="https://twitter.com/uwcse">@uwcse</a> 🎓
           neovim enthusiast 💻 I help neural networks find local minima 🧠 <br></br>
