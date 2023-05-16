@@ -5,7 +5,7 @@
  **/
 const nextConfig = {
   output: 'export',
-  basePath: '/dillonalaird.github.io',
+  basePath: '/',
   images: {
     unoptimized: true,
   },
