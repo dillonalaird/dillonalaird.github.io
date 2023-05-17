@@ -5,7 +5,7 @@
  **/
 const nextConfig = {
   output: 'export',
-  basePath: '/',
+  basePath: '',
   images: {
     unoptimized: true,
   },
