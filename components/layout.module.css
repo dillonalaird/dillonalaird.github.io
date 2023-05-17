@@ -10,6 +10,13 @@
   align-items: center;
 }
 
+.background {
+  width: 100%;
+  top: 0;
+  left: 0;
+  background-image: url('/images/art.jpg');
+}
+
 .backToHome {
   margin: 3rem 0 0;
 }

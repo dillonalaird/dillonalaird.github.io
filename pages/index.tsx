@@ -1,4 +1,5 @@
 import Head from 'next/head'
+import Image from 'next/image'
 import Layout, { siteTitle } from '../components/layout'
 import utilStyles from '../styles/utils.module.css'
 import { getSortedPostsData } from '../lib/posts'
@@ -12,6 +13,7 @@ export default function Home({
   allPostsData: {
     date: string
     title: string
+    image: string
     id: string
   }[]
 }) {
@@ -35,8 +37,15 @@ export default function Home({
       <section className={`${utilStyles.headingMd} ${utilStyles.padding1px}`}>
         <h2 className={utilStyles.headingLg}>Blog</h2>
         <ul className={utilStyles.list}>
-          {allPostsData.map(({ id, date, title }) => (
+          {allPostsData.map(({ id, date, title, image }) => (
             <li className={utilStyles.listItem} key={id}>
+              <Image
+                className={utilStyles.listImage}
+                src={image}
+                height={100}
+                width={128}
+                alt='test'
+              />
               <Link href={`/posts/${id}`}>{title}</Link>
               <br />
               <small className={utilStyles.lightText}>

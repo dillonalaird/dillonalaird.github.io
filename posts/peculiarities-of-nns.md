@@ -1,6 +1,7 @@
 ---
 title: The Peculiarities of Training Neural Networks
 date: '2017-07-04'
+image: '/images/cat.png'
 ---
 
 Neural networks are notoriously difficult to train. They can completely diverge

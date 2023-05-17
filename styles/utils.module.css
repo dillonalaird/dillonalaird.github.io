@@ -50,3 +50,8 @@
 .lightText {
   color: #666;
 }
+
+.listImage {
+  float: left;
+  padding-right: 10px;
+}
