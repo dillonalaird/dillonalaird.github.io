@@ -1,6 +1,6 @@
 ---
 title: How Quantization Works & Quantizing SAM
-date: '2023-06-02'
+date: '2023-06-20'
 image: '/images/scale.png'
 ---
 
@@ -82,7 +82,7 @@ together:
 Where `row_wise` and `col_wise` quantize functions can be either **absmax** or **zeropoint** but applied
 per row or per column as described above. I also recommend checking out Tim Dettmers's
 [blog](https://huggingface.co/blog/hf-bitsandbytes-integration) which has a great animation of the above
-computation. You can find all the code for the above implementations [here](TODO!)
+computation. You can find all the code for the above implementations [here](https://github.com/dillonalaird/quantized-sam)
 
 ### Using INT8/NF4 For Vision Models
 
@@ -113,9 +113,10 @@ Finally we can call the model by passing it a half precision input, all the step
 like this:
 ![](/images/bnb_quantize_example.png)
 To get this working with the SAM model you must insure the `Linear` layers it replaces are doing
-matrix multiplication on 2d matrices. I've done this in the repository [here]() as well as added
-all the quantization functions above so you can play around with it. Below are some latency
-and memory numbers on an RTX A5000 (you can find the 4bit conversion in the repository code):
+matrix multiplication on 2d matrices. I've done this in the repository
+[here](https://github.com/dillonalaird/quantized-sam) as well as added all the quantization
+functions above so you can play around with it. Below are some latency and memory numbers on an
+RTX A5000 (you can find the 4bit conversion in the repository code):
 ![](/images/table.png)
 You can see the max allocated memory reduces by about ~1GB from 32bit to 8bit and you get a
 little half the latency. The latency times are about ~1.5x slower on 8bit than 16bit but the
@@ -130,4 +131,5 @@ This shows about a 75% reduction from 32bit to 8bit and then halving it again wh
 
 To recap we've covered two basic types of quantization, **absmax** and **zeropoint** quantization.
 We've also shown how to quantize a vision transformer model, SAM, using the bitsandbytes library
-giving us up to an 86% reduction in model size!
+giving us up to an 86% reduction in model size! All the quantization example code as well as code
+for quantizing and running the SAM backbone are available [here](https://github.com/dillonalaird/quantized-sam)
