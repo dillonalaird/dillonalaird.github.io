@@ -1,0 +1,114 @@
+<!DOCTYPE html><html><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width"/><link rel="icon" href="/favicon.ico"/><meta name="Dillon Laird&#x27;s Blog" content=""/><meta property="og:image" content="https://og-image.vercel.app/Dillon%20Laird&#x27;s%20Blog.png?theme=light&amp;md=0&amp;fontSize=75px&amp;images=https%3A%2F%2Fassets.zeit.co%2Fimage%2Fupload%2Ffront%2Fassets%2Fdesign%2Fnextjs-black-logo.svg"/><meta name="og:title" content="Dillon Laird&#x27;s Blog"/><meta name="twitter:card" content="summary_large_image"/><link rel="preload" as="image" href="/images/headshot.jpg" fetchpriority="high"/><title>How Quantization Works &amp; Quantizing SAM</title><meta name="next-head-count" content="9"/><link rel="preload" href="/_next/static/css/0275f6d90e7ad339.css" as="style"/><link rel="stylesheet" href="/_next/static/css/0275f6d90e7ad339.css" data-n-g=""/><link rel="preload" href="/_next/static/css/961fea2ebabf6bad.css" as="style"/><link rel="stylesheet" href="/_next/static/css/961fea2ebabf6bad.css" data-n-p=""/><noscript data-n-css=""></noscript><script defer="" nomodule="" src="/_next/static/chunks/polyfills-c67a75d1b6f99dc8.js"></script><script src="/_next/static/chunks/webpack-8fa1640cc84ba8fe.js" defer=""></script><script src="/_next/static/chunks/framework-2c79e2a64abdb08b.js" defer=""></script><script src="/_next/static/chunks/main-b704c5263bb49c2d.js" defer=""></script><script src="/_next/static/chunks/pages/_app-2d6bf7b3192a8752.js" defer=""></script><script src="/_next/static/chunks/112-63115978d1c7a883.js" defer=""></script><script src="/_next/static/chunks/pages/posts/%5Bid%5D-2eb6281a0d9327e7.js" defer=""></script><script src="/_next/static/jP47HaCQpa99gGRvf2AWZ/_buildManifest.js" defer=""></script><script src="/_next/static/jP47HaCQpa99gGRvf2AWZ/_ssgManifest.js" defer=""></script></head><body><div id="__next"><div class="layout_container__fbLkO"><header class="layout_header__kY0Lt"><a href="/"><img alt="Dillon Laird" fetchpriority="high" width="108" height="108" decoding="async" data-nimg="1" class="utils_borderCircle__s2nTm" style="color:transparent" src="/images/headshot.jpg"/></a><h2 class="utils_headingLg__5535D"><a class="utils_colorInherit__mSH_x" href="/">Dillon Laird</a></h2></header><main><article><h1 class="utils_headingXl__u25Y2">How Quantization Works &amp; Quantizing SAM</h1><div class="utils_lightText__eUzGY"><time dateTime="2023-06-20">June 20, 2023</time></div><div><h2>Introduction</h2>
+<p>Several papers have come out recently showing how to run large language models with much less memory
+so they can be and infer on smaller devices such as <a href="https://arxiv.org/abs/2208.07339">LLM.int8()</a> and
+<a href="https://arxiv.org/abs/2305.14314">QLoRA</a>. I wanted to better understand how they work and also apply
+them to <a href="https://arxiv.org/abs/2010.11929">transformer vision models</a>. In this blog post I'll go
+through the different quantization schemes presented in <a href="https://arxiv.org/abs/2208.07339">LLM.int8()</a>
+along with simple numpy implementations and at the end I also show how to use int8 and 4-bit
+quantization on the <a href="https://github.com/facebookresearch/segment-anything/tree/main">Segment-Anything-Model (SAM)</a>
+backbone to improve the memory consumption. If you haven't already I also highly recommend checking
+out Tim Dettmer's <a href="https://huggingface.co/blog/hf-bitsandbytes-integration">blog on 8-bit matrix multiplication</a>
+and <a href="https://huggingface.co/blog/4bit-transformers-bitsandbytes">4-bit quantization</a> which served as
+the basis for writing this blog.</p>
+<h2>Quantization</h2>
+<p>Quantization in machine learning is a way to reduce latency and memory by representing numbers with
+fewer bits. I'm going to assume you are familiar with how floating point numbers are represented and
+get right into int8 quantization techniques. The main objective is to figure out how best to quantize
+numbers such that you loose the least amount of information. We'll cover three ways to do this, the first
+being <strong>absmax quantization</strong>.</p>
+<h3>Absmax</h3>
+<p><strong>Absmax quantization</strong> is fairly simple, you just scale the input into
+the range [-127, 127] by dividing by the maximum value and then multiplying by 127. Here's a small
+python script to compute it:
+<img src="/images/absmax_quantize.png" alt="">
+Here <code>s_x</code> si the scaling factor, so the 127 / max(|X|), which we multiply by X to move it to the range
+of -127 to 127. For example:
+<img src="/images/absmax_quantize_example.png" alt="">
+You can see above the largest number, 4, went to 127 and the scaling factor used was 31.75 where 4 * 31.75
+= 127. You can dequantize this with the following python code:
+<img src="/images/absmax_dequantize.png" alt="">
+Dequantizing the above array we get:
+<img src="/images/absmax_dequantize_example.png" alt="">
+But what happens if we only have positive values? We end up only using half of the quantization range:
+<img src="/images/absmax_quantize_bad_example.png" alt="">
+This can lead to quantization errors. This leads us to <strong>zeropoint quantization</strong>.</p>
+<h3>Zeropoint Quantization</h3>
+<p><strong>Zeropoint quantization</strong> solves this issue by scaling then shifting the numbers. First we scale the
+input by the normalized dynamic range <code>nd</code>:
+<img src="/images/dyna_example.png" alt="">
+Then we shift by the zeropoint <code>zp</code>
+<img src="/images/zeropoint_example.png" alt="">
+So we are rescaling to a new range, the size of which is 255:
+<img src="/images/scale.png" alt="">
+And then moving the minimum value into this new range, offsetting it by 128, which is half the size
+of our new range, and using that to shift the range over 0:
+<img src="/images/offset.png" alt="">
+Putting it all together in python with a few other checks we have:
+<img src="/images/zeropoint_quantize.png" alt="">
+And to dequantize we simply subtract the zero point and divide by the scale:
+<img src="/images/zeropoint_dequantize.png" alt="">
+To get even better quantization results, you can also apply either <strong>absmax</strong> or <strong>zeropoint</strong> quantization
+per row or column of a matrix. This helps deal with more variability in the input. You can find a good
+overview of zeropoint quantization (also called affine quantization) <a href="https://arxiv.org/abs/2004.09602">here</a>
+in secction 3.1.1. It turns out this still isn't enough to get quantization to work well for larger models
+as important outlier features can lead to quantization errors.</p>
+<h3>LLM.int8() Quantization</h3>
+<p>Tim Dettmers was able to solve this issue in his <a href="https://arxiv.org/abs/2208.07339"><strong>LLM.int8()</strong> paper</a>
+by introducing a hybrid approach. In the paper he notes that outlier features with large magnitudes start
+to emerge with larger transformers and have a strong affect on attention and prediction performance. To
+preserve these features we simply extract outlier features from the input X and multiply those in float16
+while we quantize the rest to int8. Here we assume outlier features have magnitude 2 or more:
+<img src="/images/llm.int8_outliers.png" alt=""></p>
+<p>Once you have to two separate sets of matrices, you can use whatever int8 implementation you want,
+<strong>absmax</strong> or <strong>zeropoint</strong>, the outlier matrices will be multiplied in fp16 and both results added
+together:
+<img src="/images/llm.int8_mult.png" alt="">
+Where <code>row_wise</code> and <code>col_wise</code> quantize functions can be either <strong>absmax</strong> or <strong>zeropoint</strong> but applied
+per row or per column as described above. I also recommend checking out Tim Dettmers's
+<a href="https://huggingface.co/blog/hf-bitsandbytes-integration">blog</a> which has a great animation of the above
+computation. You can find all the code for the above implementations <a href="https://github.com/dillonalaird/quantized-sam">here</a></p>
+<h3>Using INT8/NF4 For Vision Models</h3>
+<p>While the <a href="https://huggingface.co/blog/hf-bitsandbytes-integration">blog</a> shows how easy it is to apply
+int8 quantization to language models from huggingface, I found it difficult to apply it to other models
+such as the SAM backbone. To run the following code you'll first want to install bitsandbytes following
+the instructions from their <a href="https://github.com/TimDettmers/bitsandbytes">github page</a>. Then make sure
+you install the latest versions of these libraries from github</p>
+<pre><code>pip install --upgrade git+https://github.com/huggingface/transformers.git
+pip install --upgrade git+https://github.com/huggingface/accelerate.git
+</code></pre>
+<p>You'll need to build the model in fp16 as the int8 module only works with fp16 input for now. Then
+call <code>replace_with_bnb_layer</code> which will replace all linear layers with the 8 bit linear layer
+(or 4 bit if you choose to use that layer). You can see before calling, we have typical <code>Linear</code>
+layers:
+<img src="/images/sam_model.png" alt="">
+and after calling they turn into <code>Linear8BitLt</code> layers:
+<img src="/images/sam_model_int8.png" alt=""></p>
+<p>If we print out one of the layers <code>model.blacks[0].attn.qkv</code> it prints
+<code>Parameter(Int8Params(..., device='meta', size=(3840, 1280)))</code> which is the int8 parameters. But
+it's still emtpy and set to the <code>meta</code> device. To fill in the weights we need to call
+<code>set_module_quantized_tensor_to_device</code>, which now allows us to see the quantized weights by
+printing the layer again:
+<img src="/images/sam_model_int8_params.png" alt="">
+Finally we can call the model by passing it a half precision input, all the steps together look
+like this:
+<img src="/images/bnb_quantize_example.png" alt="">
+To get this working with the SAM model you must insure the <code>Linear</code> layers it replaces are doing
+matrix multiplication on 2d matrices. I've done this in the repository
+<a href="https://github.com/dillonalaird/quantized-sam">here</a> as well as added all the quantization
+functions above so you can play around with it. Below are some latency and memory numbers on an
+RTX A5000 (you can find the 4bit conversion in the repository code):
+<img src="/images/table.png" alt="">
+You can see the max allocated memory reduces by about ~1GB from 32bit to 8bit and you get a
+little half the latency. The latency times are about ~1.5x slower on 8bit than 16bit but the
+authors are working to decrease that time. The relative decrease in max allocated memory is
+not that much compared to 32 or 16 bit but if we calculate the actual model size we get a more
+clear picture:
+<img src="/images/model_sizes.png" alt="">
+This shows about a 75% reduction from 32bit to 8bit and then halving it again when we go to
+4 bit!</p>
+<h3>Conclusion</h3>
+<p>To recap we've covered two basic types of quantization, <strong>absmax</strong> and <strong>zeropoint</strong> quantization.
+We've also shown how to quantize a vision transformer model, SAM, using the bitsandbytes library
+giving us up to an 86% reduction in model size! All the quantization example code as well as code
+for quantizing and running the SAM backbone are available <a href="https://github.com/dillonalaird/quantized-sam">here</a></p>
+</div></article></main><div class="layout_backToHome__9sjx_"><a href="/">← Back to home</a></div></div></div><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"postData":{"id":"quantized-models","contentHtml":"\u003ch2\u003eIntroduction\u003c/h2\u003e\n\u003cp\u003eSeveral papers have come out recently showing how to run large language models with much less memory\nso they can be and infer on smaller devices such as \u003ca href=\"https://arxiv.org/abs/2208.07339\"\u003eLLM.int8()\u003c/a\u003e and\n\u003ca href=\"https://arxiv.org/abs/2305.14314\"\u003eQLoRA\u003c/a\u003e. I wanted to better understand how they work and also apply\nthem to \u003ca href=\"https://arxiv.org/abs/2010.11929\"\u003etransformer vision models\u003c/a\u003e. In this blog post I'll go\nthrough the different quantization schemes presented in \u003ca href=\"https://arxiv.org/abs/2208.07339\"\u003eLLM.int8()\u003c/a\u003e\nalong with simple numpy implementations and at the end I also show how to use int8 and 4-bit\nquantization on the \u003ca href=\"https://github.com/facebookresearch/segment-anything/tree/main\"\u003eSegment-Anything-Model (SAM)\u003c/a\u003e\nbackbone to improve the memory consumption. If you haven't already I also highly recommend checking\nout Tim Dettmer's \u003ca href=\"https://huggingface.co/blog/hf-bitsandbytes-integration\"\u003eblog on 8-bit matrix multiplication\u003c/a\u003e\nand \u003ca href=\"https://huggingface.co/blog/4bit-transformers-bitsandbytes\"\u003e4-bit quantization\u003c/a\u003e which served as\nthe basis for writing this blog.\u003c/p\u003e\n\u003ch2\u003eQuantization\u003c/h2\u003e\n\u003cp\u003eQuantization in machine learning is a way to reduce latency and memory by representing numbers with\nfewer bits. I'm going to assume you are familiar with how floating point numbers are represented and\nget right into int8 quantization techniques. The main objective is to figure out how best to quantize\nnumbers such that you loose the least amount of information. We'll cover three ways to do this, the first\nbeing \u003cstrong\u003eabsmax quantization\u003c/strong\u003e.\u003c/p\u003e\n\u003ch3\u003eAbsmax\u003c/h3\u003e\n\u003cp\u003e\u003cstrong\u003eAbsmax quantization\u003c/strong\u003e is fairly simple, you just scale the input into\nthe range [-127, 127] by dividing by the maximum value and then multiplying by 127. Here's a small\npython script to compute it:\n\u003cimg src=\"/images/absmax_quantize.png\" alt=\"\"\u003e\nHere \u003ccode\u003es_x\u003c/code\u003e si the scaling factor, so the 127 / max(|X|), which we multiply by X to move it to the range\nof -127 to 127. For example:\n\u003cimg src=\"/images/absmax_quantize_example.png\" alt=\"\"\u003e\nYou can see above the largest number, 4, went to 127 and the scaling factor used was 31.75 where 4 * 31.75\n= 127. You can dequantize this with the following python code:\n\u003cimg src=\"/images/absmax_dequantize.png\" alt=\"\"\u003e\nDequantizing the above array we get:\n\u003cimg src=\"/images/absmax_dequantize_example.png\" alt=\"\"\u003e\nBut what happens if we only have positive values? We end up only using half of the quantization range:\n\u003cimg src=\"/images/absmax_quantize_bad_example.png\" alt=\"\"\u003e\nThis can lead to quantization errors. This leads us to \u003cstrong\u003ezeropoint quantization\u003c/strong\u003e.\u003c/p\u003e\n\u003ch3\u003eZeropoint Quantization\u003c/h3\u003e\n\u003cp\u003e\u003cstrong\u003eZeropoint quantization\u003c/strong\u003e solves this issue by scaling then shifting the numbers. First we scale the\ninput by the normalized dynamic range \u003ccode\u003end\u003c/code\u003e:\n\u003cimg src=\"/images/dyna_example.png\" alt=\"\"\u003e\nThen we shift by the zeropoint \u003ccode\u003ezp\u003c/code\u003e\n\u003cimg src=\"/images/zeropoint_example.png\" alt=\"\"\u003e\nSo we are rescaling to a new range, the size of which is 255:\n\u003cimg src=\"/images/scale.png\" alt=\"\"\u003e\nAnd then moving the minimum value into this new range, offsetting it by 128, which is half the size\nof our new range, and using that to shift the range over 0:\n\u003cimg src=\"/images/offset.png\" alt=\"\"\u003e\nPutting it all together in python with a few other checks we have:\n\u003cimg src=\"/images/zeropoint_quantize.png\" alt=\"\"\u003e\nAnd to dequantize we simply subtract the zero point and divide by the scale:\n\u003cimg src=\"/images/zeropoint_dequantize.png\" alt=\"\"\u003e\nTo get even better quantization results, you can also apply either \u003cstrong\u003eabsmax\u003c/strong\u003e or \u003cstrong\u003ezeropoint\u003c/strong\u003e quantization\nper row or column of a matrix. This helps deal with more variability in the input. You can find a good\noverview of zeropoint quantization (also called affine quantization) \u003ca href=\"https://arxiv.org/abs/2004.09602\"\u003ehere\u003c/a\u003e\nin secction 3.1.1. It turns out this still isn't enough to get quantization to work well for larger models\nas important outlier features can lead to quantization errors.\u003c/p\u003e\n\u003ch3\u003eLLM.int8() Quantization\u003c/h3\u003e\n\u003cp\u003eTim Dettmers was able to solve this issue in his \u003ca href=\"https://arxiv.org/abs/2208.07339\"\u003e\u003cstrong\u003eLLM.int8()\u003c/strong\u003e paper\u003c/a\u003e\nby introducing a hybrid approach. In the paper he notes that outlier features with large magnitudes start\nto emerge with larger transformers and have a strong affect on attention and prediction performance. To\npreserve these features we simply extract outlier features from the input X and multiply those in float16\nwhile we quantize the rest to int8. Here we assume outlier features have magnitude 2 or more:\n\u003cimg src=\"/images/llm.int8_outliers.png\" alt=\"\"\u003e\u003c/p\u003e\n\u003cp\u003eOnce you have to two separate sets of matrices, you can use whatever int8 implementation you want,\n\u003cstrong\u003eabsmax\u003c/strong\u003e or \u003cstrong\u003ezeropoint\u003c/strong\u003e, the outlier matrices will be multiplied in fp16 and both results added\ntogether:\n\u003cimg src=\"/images/llm.int8_mult.png\" alt=\"\"\u003e\nWhere \u003ccode\u003erow_wise\u003c/code\u003e and \u003ccode\u003ecol_wise\u003c/code\u003e quantize functions can be either \u003cstrong\u003eabsmax\u003c/strong\u003e or \u003cstrong\u003ezeropoint\u003c/strong\u003e but applied\nper row or per column as described above. I also recommend checking out Tim Dettmers's\n\u003ca href=\"https://huggingface.co/blog/hf-bitsandbytes-integration\"\u003eblog\u003c/a\u003e which has a great animation of the above\ncomputation. You can find all the code for the above implementations \u003ca href=\"https://github.com/dillonalaird/quantized-sam\"\u003ehere\u003c/a\u003e\u003c/p\u003e\n\u003ch3\u003eUsing INT8/NF4 For Vision Models\u003c/h3\u003e\n\u003cp\u003eWhile the \u003ca href=\"https://huggingface.co/blog/hf-bitsandbytes-integration\"\u003eblog\u003c/a\u003e shows how easy it is to apply\nint8 quantization to language models from huggingface, I found it difficult to apply it to other models\nsuch as the SAM backbone. To run the following code you'll first want to install bitsandbytes following\nthe instructions from their \u003ca href=\"https://github.com/TimDettmers/bitsandbytes\"\u003egithub page\u003c/a\u003e. Then make sure\nyou install the latest versions of these libraries from github\u003c/p\u003e\n\u003cpre\u003e\u003ccode\u003epip install --upgrade git+https://github.com/huggingface/transformers.git\npip install --upgrade git+https://github.com/huggingface/accelerate.git\n\u003c/code\u003e\u003c/pre\u003e\n\u003cp\u003eYou'll need to build the model in fp16 as the int8 module only works with fp16 input for now. Then\ncall \u003ccode\u003ereplace_with_bnb_layer\u003c/code\u003e which will replace all linear layers with the 8 bit linear layer\n(or 4 bit if you choose to use that layer). You can see before calling, we have typical \u003ccode\u003eLinear\u003c/code\u003e\nlayers:\n\u003cimg src=\"/images/sam_model.png\" alt=\"\"\u003e\nand after calling they turn into \u003ccode\u003eLinear8BitLt\u003c/code\u003e layers:\n\u003cimg src=\"/images/sam_model_int8.png\" alt=\"\"\u003e\u003c/p\u003e\n\u003cp\u003eIf we print out one of the layers \u003ccode\u003emodel.blacks[0].attn.qkv\u003c/code\u003e it prints\n\u003ccode\u003eParameter(Int8Params(..., device='meta', size=(3840, 1280)))\u003c/code\u003e which is the int8 parameters. But\nit's still emtpy and set to the \u003ccode\u003emeta\u003c/code\u003e device. To fill in the weights we need to call\n\u003ccode\u003eset_module_quantized_tensor_to_device\u003c/code\u003e, which now allows us to see the quantized weights by\nprinting the layer again:\n\u003cimg src=\"/images/sam_model_int8_params.png\" alt=\"\"\u003e\nFinally we can call the model by passing it a half precision input, all the steps together look\nlike this:\n\u003cimg src=\"/images/bnb_quantize_example.png\" alt=\"\"\u003e\nTo get this working with the SAM model you must insure the \u003ccode\u003eLinear\u003c/code\u003e layers it replaces are doing\nmatrix multiplication on 2d matrices. I've done this in the repository\n\u003ca href=\"https://github.com/dillonalaird/quantized-sam\"\u003ehere\u003c/a\u003e as well as added all the quantization\nfunctions above so you can play around with it. Below are some latency and memory numbers on an\nRTX A5000 (you can find the 4bit conversion in the repository code):\n\u003cimg src=\"/images/table.png\" alt=\"\"\u003e\nYou can see the max allocated memory reduces by about ~1GB from 32bit to 8bit and you get a\nlittle half the latency. The latency times are about ~1.5x slower on 8bit than 16bit but the\nauthors are working to decrease that time. The relative decrease in max allocated memory is\nnot that much compared to 32 or 16 bit but if we calculate the actual model size we get a more\nclear picture:\n\u003cimg src=\"/images/model_sizes.png\" alt=\"\"\u003e\nThis shows about a 75% reduction from 32bit to 8bit and then halving it again when we go to\n4 bit!\u003c/p\u003e\n\u003ch3\u003eConclusion\u003c/h3\u003e\n\u003cp\u003eTo recap we've covered two basic types of quantization, \u003cstrong\u003eabsmax\u003c/strong\u003e and \u003cstrong\u003ezeropoint\u003c/strong\u003e quantization.\nWe've also shown how to quantize a vision transformer model, SAM, using the bitsandbytes library\ngiving us up to an 86% reduction in model size! All the quantization example code as well as code\nfor quantizing and running the SAM backbone are available \u003ca href=\"https://github.com/dillonalaird/quantized-sam\"\u003ehere\u003c/a\u003e\u003c/p\u003e\n","title":"How Quantization Works \u0026 Quantizing SAM","date":"2023-06-20","image":"/images/scale.png"}},"__N_SSG":true},"page":"/posts/[id]","query":{"id":"quantized-models"},"buildId":"jP47HaCQpa99gGRvf2AWZ","isFallback":false,"gsp":true,"scriptLoader":[]}</script></body></html>
